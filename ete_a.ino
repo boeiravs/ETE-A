@@ -1,37 +1,45 @@
 // Bibliotecas
-#include <NewPing.h>      // biblioteca que define parametros do sensor ultrasonico
+#include <NewPing.h>    // biblioteca que define parametros do sensor ultrasonico
+#include <TimerOne.h>   // biblioteca de timer, utilizado para fazer a interrupçao 
 
 // Variaveis de controle
-#define distMax   200    // distancia maxima captada pelo sensor ultra em cm
-#define nivelMin  15    // distancia entre sensor e nivel do tanque. Quanto maior for essa distancia, mais vazio estara o tanque   
-#define nivelMax  5     // distancia entre sensor e nivel do tanque. Quanto menor for essa distancia, mais cheio estara o tanque
+#define distMax   200       // distancia maxima captada pelo sensor ultra em cm
+#define nivelMin  15        // distancia entre sensor e nivel do tanque. Quanto maior for essa distancia, mais vazio estara o tanque   
+#define nivelMax  5         // distancia entre sensor e nivel do tanque. Quanto menor for essa distancia, mais cheio estara o tanque
+bool alarmeAtivado = false; // variavel para controlar alarme da interrupçao 
 
-// Atribuindo pinos a variaveis
-#define botEmergencia     2    // botao de emergencia para 
-#define relBombaPrincipal 6    // modulo rele bomba principal (ligada entre tanque principal e tanque auxiliar)
-#define relBombaPh        7    // modulo rele bomba pH (ligada entre tanque principal e tanque estabilizador de ph)
-#define ledRedOff         9    // led indicativo de bomba OFF
-#define ledGreOn          10   // led indicativo de bomba ON 
-#define senTrig           11   // trigger = envia sinal ultrasonico
-#define senEcho           12   // echo = le sinal ultrasonico de retorno
+// Atribuindo pinos a variaveis (Portas ethernet shield 4,10,11,12,13)
+#define botEmergencia     2   // botao de emergencia para interrupçao (INT0)
+#define relBombaPrincipal 3   // modulo rele bomba principal (ligada entre tanque principal e tanque auxiliar)
+#define relBombaPh        5   // modulo rele bomba pH (ligada entre tanque principal e tanque estabilizador de ph)
+#define senTrig           6   // trigger = envia sinal ultrasonico
+#define senEcho           7   // echo = le sinal ultrasonico de retorno
+#define buzEmergencia     8   // buzzer da funcao emergencia
+#define inAnalog          A0  // porta para sorteio das listas na funçao random
+#define ledRedOff         A1  // led indicativo de bomba OFF
+#define ledGreOn          A2  // led indicativo de bomba ON 
 
 NewPing sonar(senTrig, senEcho, distMax);   // funçao da biblioteca NewPing para configuração de pinos e distância máxima do sensor ultra.
 
-// Funçao SETUP
+//****************************** Funçao SETUP ******************************************************
 void setup() {
   Serial.begin(9600);
-  pinMode(ledRedOff, OUTPUT);             // setando pino do led para saida
-  pinMode(ledGreOn, OUTPUT);              // setando pino do led para saida
+  pinMode(botEmergencia, INPUT_PULLUP);   // setando pino do botao de emergencia
   pinMode(relBombaPrincipal, OUTPUT);     // setando pino do modulo rele bomba principal para saida
   pinMode(relBombaPh, OUTPUT);            // setando pino do modulo rele bomba pH para saida
+  pinMode(buzEmergencia, OUTPUT);         // setando pino do buzzer saida
+  pinMode(ledRedOff, OUTPUT);             // setando pino do led para saida
+  pinMode(ledGreOn, OUTPUT);              // setando pino do led para saida
 
-  randomSeed(analogRead(A0));             // sorteando listas da função random para melhorar precisão no sorteio
+  randomSeed(analogRead(inAnalog));             // sorteando listas da função random para melhorar precisão no sorteio
+  attachInterrupt(0, FunEmergencia, FALLING); // interrupçao para executar a funçao emergencia, sem que o bot
+  
 }
 
-// Funçao LOOP
+//****************************** Funçao LOOP ******************************************************
 void loop() {
   int nivelTanqueCm = sonar.ping_cm();     // funçao para obter distância em cm
-  int ph, cont=1;
+  int ph;
 
   if(nivelTanqueCm != 0){
     Serial.print("Nivel do Tanque Principal: ");
@@ -54,7 +62,7 @@ void loop() {
       
       ph = random(7,15);  // pH = 7 neutro // quanto mais alto que 7 for o pH mais alcalino é o efluente
       if(ph == 7){
-        nivelMax == 4;
+//        nivelMax = 4;
         Serial.print("pH NEUTRO detectado: ");
         Serial.println(ph);
         delay(1000);        
@@ -75,16 +83,28 @@ void loop() {
   }
 }
 
-// Funçao EMERGENCIA
+//****************************** Funçao EMERGENCIA ***************************************************
 void FunEmergencia(){
-  /*
-  Ativar buzzer para alertar q esta em estado de emergencia
-  avaliar colocar delay ou colocar interrupçao para tratar troca do estado de LOW para HIGH, inicializar em HIGH se for usado troca de estado no LOOP   
-  colocar botao escondido em outra porta para desativar a interrupçao  
-   
-   */
+  if(alarmeAtivado){                           // variavel inicializada em false
+    digitalWrite(buzEmergencia, LOW);          // buzzer Off
+    alarmeAtivado = false;                     // alarme desativado, condiçao normal
+    Timer1.detachInterrupt();                  // interrupçao nao ativada
+  }else{
+    digitalWrite(buzEmergencia, HIGH);         // buzzer On
+    digitalWrite(relBombaPrincipal, HIGH);     // pino rele em HIGH, Bomba Principal OFF
+    digitalWrite(relBombaPh, HIGH);            // pino rele em HIGH, Bomba pH OFF
+    alarmeAtivado = true;                      // alarme ativado, quando botao emergencia for apertado
+    Timer1.initialize(1000000);                // 1 segundo
+    Timer1.attachInterrupt(FunAlarme);         // interrupçao ativada e chamando funçao para tocar buzzer
+  }
 }
 
+//****************************** Funçao ALARME ******************************************************
+void FunAlarme(){
+  digitalWrite(buzEmergencia, !digitalRead(buzEmergencia)); // trocando status do buzzer de 1 em 1s
+}
+
+//****************************** Funçao PH **********************************************************
 void FunPh(int ph){
     switch(ph){
       case 8:
